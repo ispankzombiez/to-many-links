@@ -60,6 +60,7 @@
     <script>
       const video = document.getElementById("video");
       const fallback = document.getElementById("fallback");
+      let lockInput = false;
 
       function isFullscreenActive() {
         return Boolean(
@@ -111,6 +112,19 @@
         fallback.classList.remove("show");
       }
 
+      function updateInputLock() {
+        lockInput = isFullscreenActive();
+      }
+
+      function blockWhenLocked(event) {
+        if (!lockInput) {
+          return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+      }
+
       async function startPlayback() {
         try {
           video.muted = false;
@@ -137,6 +151,27 @@
         { passive: true }
       );
       video.addEventListener("play", tryFullscreen);
+      document.addEventListener("fullscreenchange", updateInputLock);
+      document.addEventListener("webkitfullscreenchange", updateInputLock);
+      [
+        "click",
+        "dblclick",
+        "mousedown",
+        "mouseup",
+        "pointerdown",
+        "pointerup",
+        "touchstart",
+        "touchend",
+        "keydown",
+        "keyup",
+        "wheel",
+        "contextmenu"
+      ].forEach((eventName) => {
+        document.addEventListener(eventName, blockWhenLocked, {
+          capture: true,
+          passive: false
+        });
+      });
 
       video.addEventListener("ended", async () => {
         if (document.fullscreenElement && document.exitFullscreen) {
@@ -154,6 +189,8 @@
             // Ignore browser refusal.
           }
         }
+
+        updateInputLock();
       });
 
       startPlayback();
