@@ -30,6 +30,14 @@
         background: #000;
       }
 
+      video::-webkit-media-controls {
+        display: none !important;
+      }
+
+      video::-webkit-media-controls-enclosure {
+        display: none !important;
+      }
+
       #fallback {
         position: fixed;
         inset: 0;
@@ -50,7 +58,16 @@
     </style>
   </head>
   <body>
-    <video id="video" autoplay playsinline preload="auto">
+    <video
+      id="video"
+      autoplay
+      playsinline
+      preload="auto"
+      controls="false"
+      controlslist="nodownload nofullscreen noplaybackrate noremoteplayback"
+      disablepictureinpicture
+      disableremoteplayback
+    >
       <source src="rick-roll.mp4" type="video/mp4" />
       Your browser does not support HTML5 video.
     </video>
@@ -61,6 +78,10 @@
       const video = document.getElementById("video");
       const fallback = document.getElementById("fallback");
       let lockInput = false;
+
+      // Keep controls disabled even if a browser extension or script toggles them.
+      video.controls = false;
+      video.removeAttribute("controls");
 
       function isFullscreenActive() {
         return Boolean(
