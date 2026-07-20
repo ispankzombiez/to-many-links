@@ -55,6 +55,21 @@
       #fallback.show {
         display: grid;
       }
+
+      #countdown {
+        position: fixed;
+        top: 1rem;
+        left: 50%;
+        transform: translateX(-50%);
+        color: #fff;
+        font: 700 1rem/1.2 "Segoe UI", Tahoma, sans-serif;
+        background: rgba(0, 0, 0, 0.45);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 999px;
+        padding: 0.45rem 0.85rem;
+        pointer-events: none;
+        user-select: none;
+      }
     </style>
   </head>
   <body>
@@ -73,11 +88,14 @@
     </video>
 
     <div id="fallback" aria-hidden="true">Tap or click anywhere for fullscreen + sound</div>
+    <div id="countdown" aria-hidden="true">Time remaining 00:00</div>
 
     <script>
       const video = document.getElementById("video");
       const fallback = document.getElementById("fallback");
+      const countdown = document.getElementById("countdown");
       let lockInput = false;
+      let countdownInterval;
 
       // Keep controls disabled even if a browser extension or script toggles them.
       video.controls = false;
@@ -146,6 +164,40 @@
         event.stopPropagation();
       }
 
+      function formatClock(totalSeconds) {
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+      }
+
+      function updateCountdown() {
+        if (!Number.isFinite(video.duration) || video.duration <= 0) {
+          countdown.textContent = "Time remaining --:--";
+          return;
+        }
+
+        const remaining = Math.max(0, Math.ceil(video.duration - video.currentTime));
+        countdown.textContent = `Time remaining ${formatClock(remaining)}`;
+      }
+
+      function startCountdown() {
+        clearInterval(countdownInterval);
+        updateCountdown();
+        countdownInterval = setInterval(updateCountdown, 250);
+      }
+
+      async function restoreSound() {
+        try {
+          video.muted = false;
+          video.volume = 1;
+          if (video.paused) {
+            await video.play();
+          }
+        } catch {
+          // Ignore if browser still rejects sound playback.
+        }
+      }
+
       async function startPlayback() {
         try {
           video.muted = false;
@@ -169,16 +221,21 @@
       fallback.addEventListener("click", startPlayback);
       fallback.addEventListener("touchstart", startPlayback, { passive: true });
       document.addEventListener("click", () => {
+        restoreSound();
         tryFullscreen();
       });
       document.addEventListener(
         "touchstart",
         () => {
+          restoreSound();
           tryFullscreen();
         },
         { passive: true }
       );
       video.addEventListener("play", tryFullscreen);
+      video.addEventListener("play", startCountdown);
+      video.addEventListener("timeupdate", updateCountdown);
+      video.addEventListener("loadedmetadata", updateCountdown);
       document.addEventListener("fullscreenchange", updateInputLock);
       document.addEventListener("webkitfullscreenchange", updateInputLock);
       [
@@ -202,6 +259,9 @@
       });
 
       video.addEventListener("ended", async () => {
+        clearInterval(countdownInterval);
+        countdown.textContent = "Time remaining 00:00";
+
         if (document.fullscreenElement && document.exitFullscreen) {
           try {
             await document.exitFullscreen();
