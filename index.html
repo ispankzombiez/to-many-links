@@ -57,10 +57,8 @@
   <body>
     <video
       id="video"
-      autoplay
       playsinline
       preload="auto"
-      controls="false"
       controlslist="nodownload nofullscreen noplaybackrate noremoteplayback"
       disablepictureinpicture
       disableremoteplayback
@@ -76,6 +74,9 @@
       const countdown = document.getElementById("countdown");
       let lockInput = false;
       let countdownInterval;
+      let playbackRequiresGesture = false;
+      let isStartingFromGesture = false;
+      let braveMobileCheck;
 
       // Keep controls disabled even if a browser extension or script toggles them.
       video.controls = false;
@@ -162,40 +163,87 @@
         countdownInterval = setInterval(updateCountdown, 250);
       }
 
-      async function startPlayback() {
+      async function isBraveMobileBrowser() {
+        if (typeof braveMobileCheck === "boolean") {
+          return braveMobileCheck;
+        }
+
+        const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
+        if (!isMobile) {
+          braveMobileCheck = false;
+          return false;
+        }
+
+        if (!navigator.brave || typeof navigator.brave.isBrave !== "function") {
+          braveMobileCheck = false;
+          return false;
+        }
+
         try {
+          braveMobileCheck = await navigator.brave.isBrave();
+        } catch {
+          braveMobileCheck = false;
+        }
+
+        return braveMobileCheck;
+      }
+
+      async function attemptAutoplayWithSound() {
+        try {
+          video.defaultMuted = false;
           video.muted = false;
           video.volume = 1;
-
           await video.play();
+
+          // Treat autoplay as successful only if media is actively running unmuted.
+          if (!video.paused && !video.ended && !video.muted && video.volume > 0) {
+            // Brave mobile can report unmuted playback while audio output is still blocked.
+            if (await isBraveMobileBrowser()) {
+              throw new Error("Brave mobile requires a user gesture for sound");
+            }
+
+            playbackRequiresGesture = false;
+            return;
+          }
+
+          throw new Error("Autoplay started without sound");
         } catch {
-          // Mobile browsers often block autoplay with sound. Fallback to muted autoplay
-          // so video still starts immediately instead of staying on a black frame.
-          video.muted = true;
-          await video.play().catch(() => {});
+          // If autoplay with sound is blocked, stop and wait for user gesture.
+          playbackRequiresGesture = true;
+          video.pause();
+          video.currentTime = 0;
         }
       }
 
-      async function ensurePlaybackFromGesture() {
-        if (!video.paused && !video.ended) {
+      async function startPlaybackFromGesture() {
+        if (isStartingFromGesture) {
           return;
         }
 
+        isStartingFromGesture = true;
         video.muted = false;
         video.volume = 1;
 
         try {
           await video.play();
+          playbackRequiresGesture = false;
         } catch {
-          // Some mobile browsers only allow muted recovery in edge cases.
-          video.muted = true;
-          await video.play().catch(() => {});
+          playbackRequiresGesture = true;
+          return;
+        } finally {
+          isStartingFromGesture = false;
         }
+
+        await tryFullscreen();
       }
 
-      async function handleFullscreenGesture() {
-        await ensurePlaybackFromGesture();
-        await tryFullscreen();
+      function handleFullscreenGesture() {
+        if (!playbackRequiresGesture && !video.paused && !video.ended) {
+          void tryFullscreen();
+          return;
+        }
+
+        void startPlaybackFromGesture();
       }
 
       document.addEventListener("click", handleFullscreenGesture);
@@ -248,7 +296,7 @@
         updateInputLock();
       });
 
-      startPlayback();
+      attemptAutoplayWithSound();
     </script>
   </body>
 </html>
