@@ -7,6 +7,8 @@
     <style>
       :root {
         color-scheme: only light;
+        --flower-green: #38d66b;
+        --flower-green-dark: #23b756;
       }
 
       html,
@@ -21,6 +23,54 @@
       body {
         display: grid;
         place-items: center;
+      }
+
+      #splash {
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        display: grid;
+        place-items: center;
+        gap: 1.4rem;
+        padding: 2rem;
+        background: radial-gradient(circle at 50% 12%, #1f3328 0%, #08110c 45%, #000 100%);
+        text-align: center;
+      }
+
+      #splashTitle {
+        margin: 0;
+        color: #ecffee;
+        font: 900 clamp(2rem, 9vw, 4rem) / 1.05 "Segoe UI", Tahoma, sans-serif;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      #startButton {
+        border: 0;
+        border-radius: 999px;
+        padding: 1rem 2.4rem;
+        min-width: min(90vw, 340px);
+        color: #021107;
+        background: linear-gradient(180deg, #57ef8a 0%, var(--flower-green) 65%, var(--flower-green-dark) 100%);
+        box-shadow: 0 8px 24px rgba(54, 211, 106, 0.38);
+        font: 900 clamp(1.4rem, 4.5vw, 2rem) / 1 "Segoe UI", Tahoma, sans-serif;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        cursor: pointer;
+      }
+
+      #startButton:active {
+        transform: translateY(1px);
+      }
+
+      #startHint {
+        margin: 0;
+        color: rgba(230, 255, 240, 0.92);
+        font: 600 0.98rem/1.35 "Segoe UI", Tahoma, sans-serif;
+      }
+
+      body.started #splash {
+        display: none;
       }
 
       video {
@@ -42,6 +92,7 @@
         position: fixed;
         top: 1rem;
         left: 50%;
+        z-index: 30;
         transform: translateX(-50%);
         color: #fff;
         font: 700 1rem/1.2 "Segoe UI", Tahoma, sans-serif;
@@ -52,9 +103,19 @@
         pointer-events: none;
         user-select: none;
       }
+
+      #countdown[hidden] {
+        display: none;
+      }
     </style>
   </head>
   <body>
+    <section id="splash" aria-label="Start screen">
+      <h1 id="splashTitle">$FLOWER Generator</h1>
+      <button id="startButton" type="button">Start</button>
+      <p id="startHint">Tap Start to begin fullscreen playback with sound.</p>
+    </section>
+
     <video
       id="video"
       playsinline
@@ -67,20 +128,23 @@
       Your browser does not support HTML5 video.
     </video>
 
-    <div id="countdown" aria-hidden="true">Time remaining 00:00</div>
+    <div id="countdown" hidden aria-hidden="true">until you can escape 00:00</div>
 
     <script>
       const video = document.getElementById("video");
       const countdown = document.getElementById("countdown");
+      const startButton = document.getElementById("startButton");
       let lockInput = false;
       let countdownInterval;
-      let playbackRequiresGesture = false;
-      let isStartingFromGesture = false;
-      let braveMobileCheck;
+      let started = false;
+      let startInProgress = false;
 
       // Keep controls disabled even if a browser extension or script toggles them.
       video.controls = false;
       video.removeAttribute("controls");
+      video.muted = false;
+      video.defaultMuted = false;
+      video.volume = 1;
 
       function isFullscreenActive() {
         return Boolean(
@@ -132,6 +196,15 @@
         lockInput = isFullscreenActive();
       }
 
+      function isVideoFullscreen() {
+        return Boolean(
+          document.fullscreenElement === video ||
+            document.webkitFullscreenElement === video ||
+            document.msFullscreenElement === video ||
+            video.webkitDisplayingFullscreen
+        );
+      }
+
       function blockWhenLocked(event) {
         if (!lockInput) {
           return;
@@ -149,115 +222,80 @@
 
       function updateCountdown() {
         if (!Number.isFinite(video.duration) || video.duration <= 0) {
-          countdown.textContent = "Time remaining --:--";
+          countdown.textContent = "until you can escape --:--";
           return;
         }
 
         const remaining = Math.max(0, Math.ceil(video.duration - video.currentTime));
-        countdown.textContent = `Time remaining ${formatClock(remaining)}`;
+        countdown.textContent = `until you can escape ${formatClock(remaining)}`;
       }
 
       function startCountdown() {
+        countdown.hidden = false;
+        countdown.setAttribute("aria-hidden", "false");
         clearInterval(countdownInterval);
         updateCountdown();
         countdownInterval = setInterval(updateCountdown, 250);
       }
 
-      async function isBraveMobileBrowser() {
-        if (typeof braveMobileCheck === "boolean") {
-          return braveMobileCheck;
-        }
-
-        const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
-        if (!isMobile) {
-          braveMobileCheck = false;
-          return false;
-        }
-
-        if (!navigator.brave || typeof navigator.brave.isBrave !== "function") {
-          braveMobileCheck = false;
-          return false;
-        }
-
-        try {
-          braveMobileCheck = await navigator.brave.isBrave();
-        } catch {
-          braveMobileCheck = false;
-        }
-
-        return braveMobileCheck;
-      }
-
-      async function attemptAutoplayWithSound() {
-        try {
-          video.defaultMuted = false;
-          video.muted = false;
-          video.volume = 1;
-          await video.play();
-
-          const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
-          if (isMobile && !document.userActivation.hasBeenActive) {
-            throw new Error("Mobile requires a user gesture for reliable audio output");
-          }
-
-          // Treat autoplay as successful only if media is actively running unmuted.
-          if (!video.paused && !video.ended && !video.muted && video.volume > 0) {
-            // Brave mobile can report unmuted playback while audio output is still blocked.
-            if (await isBraveMobileBrowser()) {
-              throw new Error("Brave mobile requires a user gesture for sound");
-            }
-
-            playbackRequiresGesture = false;
-            return;
-          }
-
-          throw new Error("Autoplay started without sound");
-        } catch {
-          // If autoplay with sound is blocked, stop and wait for user gesture.
-          playbackRequiresGesture = true;
-          video.pause();
-          video.currentTime = 0;
-        }
-      }
-
-      async function startPlaybackFromGesture() {
-        if (isStartingFromGesture) {
+      async function startExperience() {
+        if (startInProgress) {
           return;
         }
 
-        isStartingFromGesture = true;
+        startInProgress = true;
         video.muted = false;
+        video.defaultMuted = false;
         video.volume = 1;
 
         try {
-          await video.play();
-          playbackRequiresGesture = false;
-        } catch {
-          playbackRequiresGesture = true;
-          return;
+          const playPromise = video.play();
+          const fullscreenPromise = tryFullscreen();
+
+          await playPromise;
+          await fullscreenPromise;
+
+          started = true;
+          document.body.classList.add("started");
+          updateInputLock();
+
+          if (isVideoFullscreen()) {
+            startCountdown();
+          }
         } finally {
-          isStartingFromGesture = false;
+          startInProgress = false;
         }
-
-        await tryFullscreen();
       }
 
-      function handleFullscreenGesture() {
-        if (!playbackRequiresGesture && !video.paused && !video.ended) {
-          void tryFullscreen();
-          return;
-        }
+      startButton.addEventListener("click", () => {
+        void startExperience();
+      });
 
-        void startPlaybackFromGesture();
-      }
-
-      document.addEventListener("click", handleFullscreenGesture);
-      document.addEventListener("touchstart", handleFullscreenGesture, { passive: true });
-      video.addEventListener("play", startCountdown);
       video.addEventListener("timeupdate", updateCountdown);
       video.addEventListener("loadedmetadata", updateCountdown);
-      document.addEventListener("fullscreenchange", updateInputLock);
-      document.addEventListener("webkitfullscreenchange", updateInputLock);
+
+      function handleFullscreenStateChange() {
+        updateInputLock();
+
+        if (!started) {
+          countdown.hidden = true;
+          countdown.setAttribute("aria-hidden", "true");
+          return;
+        }
+
+        if (isVideoFullscreen() && !video.paused && !video.ended) {
+          startCountdown();
+          return;
+        }
+
+        countdown.hidden = true;
+        countdown.setAttribute("aria-hidden", "true");
+      }
+
+      document.addEventListener("fullscreenchange", handleFullscreenStateChange);
+      document.addEventListener("webkitfullscreenchange", handleFullscreenStateChange);
+      video.addEventListener("webkitbeginfullscreen", handleFullscreenStateChange);
+      video.addEventListener("webkitendfullscreen", handleFullscreenStateChange);
       [
         "click",
         "dblclick",
@@ -280,7 +318,11 @@
 
       video.addEventListener("ended", async () => {
         clearInterval(countdownInterval);
-        countdown.textContent = "Time remaining 00:00";
+        countdown.textContent = "until you can escape 00:00";
+        countdown.hidden = true;
+        countdown.setAttribute("aria-hidden", "true");
+        document.body.classList.remove("started");
+        started = false;
 
         if (document.fullscreenElement && document.exitFullscreen) {
           try {
@@ -300,8 +342,6 @@
 
         updateInputLock();
       });
-
-      attemptAutoplayWithSound();
     </script>
   </body>
 </html>
